@@ -1,0 +1,45 @@
+name: msplayground
+services:
+  rabbitmq:
+    container_name: rabbitmq
+    build: ./rabbitmq
+    environment:
+      - RABBITMQ_DEFAULT_USER=root
+      - RABBITMQ_DEFAULT_PASS=root
+      - RABBITMQ_NODENAME=rabbitmq
+    volumes:
+      - ./rabbitmq/data:/var/lib/rabbitmq/mnesia:rw
+    ports:
+      - '46100:15672'
+      - '46101:5672'
+  gateway:
+    container_name: gateway
+    build: ./gateway
+    restart: always
+    ports:
+      - '46000:3000'
+    volumes:
+      - ./gateway/src:/app/src
+    command: 'npm run dev'
+  users:
+    container_name: users
+    build: ./users
+    # ports:
+    #   - 46002:3000
+    volumes:
+      - ./users:/app
+    command: 'npm run start:dev'
+  auth:
+    container_name: auth
+    build: ./auth
+    # ports:
+    #   - 46003:3000
+    volumes:
+      - ./auth:/app
+    command: 'npm run start:dev'
+  # deposit:
+  #   build: ./deposit
+  #   ports:
+  #     - 46569:3000
+  #   volumes:
+  #     - ./deposit:/app
