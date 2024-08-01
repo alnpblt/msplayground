@@ -1,16 +1,17 @@
-import { Dialect } from "sequelize";
-import { Sequelize } from "sequelize-typescript";
+import 'dotenv/config';
+import { Dialect } from 'sequelize';
+import * as models from '../database/models/index';
 
-export default new Sequelize({
+export const settings = {
   dialect: <Dialect>process.env.DB_DIALECT,
   host: process.env.DB_HOST,
   port: Number(process.env.DB_PORT),
   username: process.env.DB_USER,
-  password: process.env.DB_PASS,
+  password: process.env.DB_PASS, 
   database: process.env.DB_DATABASE,
   logging: false,
   timezone: '+00:00',
-  models: [__dirname + '/database/models'],
+  models: Object.keys(models).map(model => models[model]),
   define: {
     charset: 'utf8',
     timestamps: true,
@@ -20,5 +21,5 @@ export default new Sequelize({
     deletedAt: 'deleted_at',
     createdAt: 'created_at',
     updatedAt: 'updated_at',
-  },
-});
+  }
+}

@@ -1,11 +1,11 @@
 import { body, oneOf, param } from 'express-validator';
 
 export default [
-  // body('first_name')
-  //   .trim()
-  //   .exists({ values: 'falsy' })
-  //   .withMessage('First name is required.')
-  //   .isString(),
+  body('first_name')
+    .trim()
+    .exists({ values: 'falsy' })
+    .withMessage('First name is required.')
+    .isString(),
   body('last_name')
     .trim()
     .exists({ values: 'falsy' })

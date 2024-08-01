@@ -1,24 +1,27 @@
-import { Module } from '@nestjs/common';
-import { ClientsModule, Transport } from '@nestjs/microservices';
-
+import { RabbitMQModule } from '@golevelup/nestjs-rabbitmq';
+import { Global, Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+@Global()
 @Module({
   imports: [
-    // ClientsModule.register([
-    //   {
-    //     name: process.env.SERVICE_NAME,
-    //     transport: Transport.RMQ,
-    //     options: {
-    //       urls: [
-    //         `amqp://${process.env.RMQ_USER}:${process.env.RMQ_PASS}@${process.env.RMQ_HOST}:${process.env.RMQ_PORT}`,
-    //       ],
-    //       queue: 'user_queue',
-    //       queueOptions: {
-    //         durable: false,
-    //       },
-    //     },
-    //   },
-    // ]),
+    RabbitMQModule.forRootAsync(RabbitMQModule, {
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => {
+        return {
+          exchanges: [
+            {
+              name: process.env.SERVICE_NAME,
+              type: 'fanout',
+              createExchangeIfNotExists: true,
+              exchangeOptions: { durable: true },
+            },
+          ],
+          uri: process.env.RMQ_URL,
+        };
+      },
+    }),
   ],
+  exports: [RabbitMQModule],
   controllers: [],
   providers: [],
 })

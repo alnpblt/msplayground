@@ -1,8 +1,10 @@
+import { Type } from 'class-transformer';
 import { IsNumber, IsString, IsDate, IsOptional } from 'class-validator';
 
 export class GetUsersDto {
   @IsOptional()
   @IsNumber({}, { each: true })
+  @Type(() => Number)
   id: number | number[] | undefined;
 
   @IsOptional()

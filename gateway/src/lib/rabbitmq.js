@@ -184,10 +184,7 @@ export default class RabbitMQ {
   /**
    * Create RabbitMQ queue
    * @param {string} queueName Queue name
-   * @param {object=} props Queue properties
-   * @param {boolean} props.durable Durable queue
-   * @param {boolean} props.autoDelete Auto delete queue
-   * @param {boolean} props.exclusive Exclusive queue
+   * @param {object=} options Queue properties
    * @returns 
    */
   async createQueue(queueName, options = {}) {
@@ -316,20 +313,18 @@ export default class RabbitMQ {
  * @param {object} options
  * @param {string} options.url RabbitMQ URL
  * @param {(Logger|console)=} options.logger Customer logger that implement console log method
- * @returns {(content: string, option: object): any}
+ * @returns {(content: string, exchangeName: string, routingKey: string, option: object) => void}
  */
-export const createPublisher = ({url, logger}) => {
-  return (content, {routingKey, exchangeName, exchangeType, exchangeOptions, ...option} = {}) => {
+export const createPublisher = ({url, logger}) =>  {
+  const broker = new RabbitMQ({url, logger, verbose: true});
+  return (content, exchangeName, routingKey, options) => {
     (async() => {
-      const broker = await new RabbitMQ({url, logger, verbose: true}).connect();
+
+      if(broker.connection === undefined || broker.connection === null) await broker.connect({close: async () => {await broker.connect()}});
+
       await broker.createChannel();
-      if(exchangeName !== undefined && exchangeType !== undefined){
-        await broker.createExchange(exchangeName, exchangeType ?? ExchangeTypes.FANOUT, exchangeOptions ?? {
-          durable: false,
-        });
-      }
-      broker.send(exchangeName, routingKey, content, option);
-      broker.close();
+      broker.send(exchangeName, routingKey, content, options);
+      broker.channel.close();
     })();
   };
 }
@@ -343,9 +338,12 @@ export const createPublisher = ({url, logger}) => {
  * @returns {(content: string, routingKey: string) => Promise<any>}
  */
 export const createRPC = ({url, logger, timeout}) => {
+  const broker = new RabbitMQ({url, logger, verbose: true});
+
   return (content, routingKey = '') => {
-    return (async() => {
-      const broker = await new RabbitMQ({url, logger, verbose: true}).connect();
+    return (async() => { 
+      if(broker.connection === undefined || broker.connection === null) await broker.connect({close: async () => {await broker.connect()}});
+
       await broker.createChannel();
       
       return new Promise(async (resolve, reject) => {
@@ -353,14 +351,14 @@ export const createRPC = ({url, logger, timeout}) => {
 
         try{
           const correlationId = broker.generateCorrelationId();
-          const queue = await broker.createQueue('', {exclusive: true});
+          var queue = await broker.createQueue('', {durable: false, exclusive: true, autoDelete: true});
           
           broker.listen(queue.queue, (message) => {
             if(message.properties.correlationId === correlationId){
               message.content = message.content.toString();
               clearTimeout(responseTimeout);
               resolve(message);
-              broker.close();
+              broker.channel.close();
             }
           });
     
@@ -374,7 +372,7 @@ export const createRPC = ({url, logger, timeout}) => {
 
         responseTimeout = setTimeout(() => {
           reject(new Error('The timeout period elapsed prior to completion of the operation or the server is not responding.'));
-          broker.close();
+          broker.channel.close();
         }, timeout ?? 30000);
       });
     })();
@@ -422,6 +420,28 @@ export const createListener = async ({context, queue, exchange, exchangeType, ro
   };
 }
 
+export const createRouter = () => {
+  const routeList = new Set();
+
+  return {
+    route: function (event, callback) {
+      routeList.add(arguments);
+    },
+    list: () => Array.from(routeList)
+  }
+}
+
+export const createSubscriber = () => {
+  const subscribeList = new Set();
+  
+  return {
+    subscribe: function (options) {
+      subscribeList.add(arguments);
+    },
+    list: () => Array.from(subscribeList)
+  }
+}
+
 /**
  * Generate a server that utilize RabbitMQ under the hood
  * @param options 
@@ -429,32 +449,78 @@ export const createListener = async ({context, queue, exchange, exchangeType, ro
  * @param options.url RabbitMQ URL
  * @param options.logger Customer logger that implement console log method
  * @param options.verbose Enable verbose mode
- * @returns {BrokerServer}
+ * @returns
  */
 export const createServer = ({queue, url, logger, verbose}) => {
-  const broker = new RabbitMQ({url, logger, verbose});
-  
-  const serverEvent = new EventEmitter();
+  if(logger === undefined){
+    logger = console;
+  }
 
-  return {
-    context: broker,
-    route: (event, callback) => {
-      logger.log(`listening to route [${event}]`);
-      serverEvent.on(event, callback);
-    },
-    subscribe: (callback, options) => {
-      if(verbose) logger.log(`subscribed to [${options.exchangeName ?? options?.routeKey ?? ''}]${options.routeKey !== undefined ? `with [${options.routeKey}] route` : ''}`);
-      (async () => {
-        if(options.exchangeType !== undefined && options.exchangeName !== null){
-          const newQueue = await broker.createQueue(`${queue}_${options.exchangeName}`, options.queueOptions);
-          await broker.createExchange(options.exchangeName, options.exchangeType, options.exchangeOptions);
-          await broker.bindQueue(newQueue.queue, options.exchangeName, options.routeKey);
-          broker.listen(newQueue.queue, callback, options.subscribeOptions);
+  const broker = new RabbitMQ({url});
+  const serverEvent = new EventEmitter();
+  let routeList = new Set();
+  let subscribeList = new Set();
+
+  const registerRoutes = (routeList) => {
+    for(const route of routeList){
+      if(verbose) logger.log(`listening to route [${route[0]}]`);
+      serverEvent.on.apply(serverEvent, route);
+    }
+  }
+
+  const registerSubscribe = async (subscribeList) => {
+    await Promise.all(subscribeList.map(async (subscribe) => {
+      await broker.createChannel()
+
+      const [options] = subscribe;
+
+      const queue = await broker.createQueue(options.queue !== undefined ? options.queue.name : '', options.queue !== undefined ? options.queue.options : {});
+
+      if(options.exchange === undefined){
+        if(verbose) logger.log(`subscribed to [${queue.queue}] queue`);
+      }
+
+      if(options.exchange !== undefined && options.exchange !== null){
+        for(const exchange of options.exchange){
+          await broker.createExchange(exchange.name, exchange.type, exchange.options);
+          await broker.bindQueue(queue.queue, exchange.name, exchange.routingKey);
+          
+          if(verbose) logger.log(`subscribed to [${exchange.name}] using [${queue.queue}] queue${exchange.routingKey !== undefined ? ` with [${exchange.routingKey}] route` : ''}`);
         }
-      })();
+      }
+
+      broker.listen(queue.queue, options.callback, options.options);
+
+      return subscribe;
+    }));
+  }
+
+  const routePayload = (message) => {
+    return {
+      properties: message.properties,
+      fields: message.fields,
+      body: message.content.data,
+      response: (content) => {
+        if(typeof content !== 'string'){
+          content = JSON.stringify(content);
+        }
+        broker.send(undefined, message.properties.replyTo, content, {correlationId: message.properties.correlationId});
+      },
+    }
+  }
+
+  const brokerServer = {
+    context: broker,
+    route: function (event, callback) {
+      routeList.add(arguments);
+      return brokerServer
+    },
+    subscribe: function (options) {
+      subscribeList.add(arguments)
+      return brokerServer;
     },
     listen: (callback) => {
-      (async() => {
+      (async () => {
         await broker.connect({
           close: async () => {
             await broker.connect();
@@ -462,22 +528,38 @@ export const createServer = ({queue, url, logger, verbose}) => {
         });
         await broker.createChannel();
         await broker.createQueue(queue, {durable: false});
+
+        registerRoutes(Array.from(routeList));
+
+        await registerSubscribe(Array.from(subscribeList));
+
+        if(verbose) logger.log(`server started`);
+
+        if(verbose) logger.log(`listening to [${queue}] for server messages`);
+
         broker.listen(queue, (message) => {
           message.content = message.content.toString();
           try{
             message.content = JSON.parse(message.content);
           }catch(e){}
           
-          serverEvent.emit(message.content.route, message);
+          serverEvent.emit(message.content.route, routePayload(message));
         }, {
           noAck: true,
           noLocal: true,
-          exclusive: true,
         });
-        return callback();
+        callback();
       })();
+    },
+    useRouter: (router) => {
+      routeList = new Set([...Array.from(routeList), ...router.list()]);
+    },
+    useSubscriber: (subscriber) => {
+      subscribeList = new Set([...Array.from(subscribeList), ...subscriber.list()]);
     }
   }
+
+  return brokerServer
 }
 
 /**

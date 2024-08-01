@@ -13,10 +13,8 @@ async function bootstrap() {
     {
       transport: Transport.RMQ,
       options: {
-        urls: [
-          `amqp://${process.env.RMQ_USER}:${process.env.RMQ_PASS}@${process.env.RMQ_HOST}:${process.env.RMQ_PORT}`,
-        ],
-        queue: 'users_service',
+        urls: [process.env.RMQ_URL],
+        queue: process.env.SERVICE_NAME,
         queueOptions: {
           durable: false,
         },

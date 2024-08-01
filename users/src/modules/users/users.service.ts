@@ -5,14 +5,32 @@ import { Users } from './entities/users.entity';
 import { RpcException } from '@nestjs/microservices';
 import { GetUsersDto } from './dto/get-users-dto';
 import { FindOptions, Op, WhereOptions } from 'sequelize';
+import { AmqpConnection } from '@golevelup/nestjs-rabbitmq';
+import * as bcrypt from 'bcryptjs';
 
 @Injectable()
 export class UsersService {
   constructor(
     @Inject('USERS_REPOSITORY') private usersRepository: typeof Users,
+    private amqpConnection: AmqpConnection,
   ) {}
 
   async createUser(createUserDto: CreateUserDto): Promise<{ data: Users }> {
+    const checkUser = await this.usersRepository.count({
+      where: { email: createUserDto.email },
+    });
+    if (checkUser) {
+      throw new RpcException({
+        code: HttpStatus.UNPROCESSABLE_ENTITY,
+        message: 'User already exists',
+      });
+    }
+
+    createUserDto.password = bcrypt.hashSync(
+      createUserDto.password,
+      bcrypt.genSaltSync(),
+    );
+
     let userInfo = null;
     try {
       userInfo = await this.usersRepository.create({
@@ -25,8 +43,12 @@ export class UsersService {
       });
     }
 
-    delete userInfo.dataValues.password;
-    delete userInfo.dataValues.deleted_at;
+    this.amqpConnection.publish<Users>(
+      process.env.DATA_EXCHANGE,
+      `${process.env.DATA_EXCHANGE_TOPIC}.createUser`,
+      userInfo,
+    );
+
     return { data: userInfo };
   }
 
@@ -37,7 +59,7 @@ export class UsersService {
     const filter: FindOptions = {
       attributes: { exclude: ['password', 'deleted_at'] },
       nest: true,
-      limit: Number(process.env.MAX_PAGE_ITEM),
+      limit: Number(process.env.MAX_PAGE_ITEMS),
       offset: 0,
     };
 
@@ -79,6 +101,7 @@ export class UsersService {
     try {
       list = await this.usersRepository.findAndCountAll(filter);
     } catch (error) {
+      console.log(error);
       throw new RpcException({
         code: HttpStatus.INTERNAL_SERVER_ERROR,
         message: 'Something went wrong while fetching users',
@@ -103,6 +126,16 @@ export class UsersService {
   }
 
   async removeUser(id: number): Promise<{ message: string }> {
+    const checkUser = await this.usersRepository.count({
+      where: { id },
+    });
+    if (checkUser) {
+      throw new RpcException({
+        code: HttpStatus.UNPROCESSABLE_ENTITY,
+        message: 'User does not exist',
+      });
+    }
+
     let removeUser = null;
     try {
       removeUser = await this.usersRepository.destroy({ where: { id } });

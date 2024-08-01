@@ -5,23 +5,31 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start:dev": "nodemon -L --watch src --exec ts-node src/index.ts"
+    "watch:server": "tsc --watch & nodemon -L --watch dist --exec 'node dist/index.js'",
+    "start:dev": "rm -rf dist && tsc && npm run watch:server",
+    "build": "tsc"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
     "amqp-connection-manager": "^4.1.14",
     "amqplib": "^0.10.4",
+    "bcryptjs": "^2.4.3",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
     "pg": "^8.12.0",
     "pg-hstore": "^2.3.4",
     "reflect-metadata": "^0.2.2",
     "sequelize": "^6.37.3",
+    "sequelize-cli": "^6.6.2",
     "sequelize-typescript": "^2.1.6"
   },
   "devDependencies": {
+    "@types/amqplib": "^0.10.5",
+    "@types/bcryptjs": "^2.4.6",
     "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.6",
     "@types/node": "^22.0.0",
     "@types/sequelize": "^4.28.20",
     "@types/validator": "^13.12.0",
